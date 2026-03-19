@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClawDesk</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+      <div class="logo">
+        <div class="logo-icon">🦞</div>
+        <span>ClawDesk</span>
+      </div>
+      
+      <nav class="nav-menu">
+        <button class="nav-item active" data-page="dashboard">
+          <span class="nav-icon">📊</span>
+          <span>概览</span>
+        </button>
+        <button class="nav-item" data-page="process">
+          <span class="nav-icon">⚡</span>
+          <span>进程详情</span>
+        </button>
+        <button class="nav-item" data-page="logs">
+          <span class="nav-icon">📋</span>
+          <span>实时日志</span>
+        </button>
+        <button class="nav-item" data-page="config">
+          <span class="nav-icon">⚙️</span>
+          <span>配置编辑</span>
+        </button>
+        <button class="nav-item" data-page="memory">
+          <span class="nav-icon">🧠</span>
+          <span>记忆管理</span>
+        </button>
+        <button class="nav-item" data-page="skills">
+          <span class="nav-icon">🧩</span>
+          <span>技能市场</span>
+        </button>
+        <button class="nav-item" data-page="commands">
+          <span class="nav-icon">⚡</span>
+          <span>快捷命令</span>
+        </button>
+      </nav>
+      
+      <div class="sidebar-footer">
+        <div class="version">v1.1.0</div>
+      </div>
+    </aside>
+    
+    <!-- 主内容 -->
+    <main class="main-content">
+      <!-- 概览页 -->
+      <section id="page-dashboard" class="page active">
+        <div class="page-header">
+          <h1>系统概览</h1>
+          <button class="btn-refresh" onclick="refreshAll()">🔄 刷新</button>
+        </div>
+        
+        <!-- 系统资源 -->
+        <div class="resource-cards">
+          <div class="resource-card">
+            <div class="resource-header">
+              <span>CPU 负载</span>
+              <span class="resource-value" id="cpu-value">-</span>
+            </div>
+            <div class="resource-bar">
+              <div class="resource-bar-fill" id="cpu-bar" style="width: 0%"></div>
+            </div>
+          </div>
+          <div class="resource-card">
+            <div class="resource-header">
+              <span>内存</span>
+              <span class="resource-value" id="mem-value">-</span>
+            </div>
+            <div class="resource-bar">
+              <div class="resource-bar-fill memory" id="mem-bar" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="status-cards">
+          <div class="status-card">
+            <div class="status-icon">🦞</div>
+            <div class="status-info">
+              <div class="status-label">OpenClaw 状态</div>
+              <div class="status-value" id="openclaw-status">检测中...</div>
+            </div>
+          </div>
+          
+          <div class="status-card">
+            <div class="status-icon">⚡</div>
+            <div class="status-info">
+              <div class="status-label">Gateway</div>
+              <div class="status-value" id="gateway-status">检测中...</div>
+            </div>
+          </div>
+          
+          <div class="status-card">
+            <div class="status-icon">🔗</div>
+            <div class="status-info">
+              <div class="status-label">Node</div>
+              <div class="status-value" id="node-status">检测中...</div>
+            </div>
+          </div>
+          
+          <div class="status-card">
+            <div class="status-icon">🧩</div>
+            <div class="status-info">
+              <div class="status-label">已安装技能</div>
+              <div class="status-value" id="skills-count">-</div>
+            </div>
+          </div>
+          
+          <div class="status-card">
+            <div class="status-icon">🧠</div>
+            <div class="status-info">
+              <div class="status-label">记忆文件</div>
+              <div class="status-value" id="memory-files">-</div>
+            </div>
+          </div>
+          
+          <div class="status-card">
+            <div class="status-icon">📈</div>
+            <div class="status-info">
+              <div class="status-label">运行时长</div>
+              <div class="status-value" id="system-uptime">-</div>
+            </div>
+          </div>
+        </div>
+      </section>
+      
+      <!-- 进程详情页 -->
+      <section id="page-process" class="page">
+        <div class="page-header">
+          <h1>进程详情</h1>
+        </div>
+        
+        <div class="process-list" id="process-list">
+          <div class="loading">加载中...</div>
+        </div>
+      </section>
+      
+      <!-- 日志页 -->
+      <section id="page-logs" class="page">
+        <div class="page-header">
+          <h1>实时日志</h1>
+          <div class="log-controls">
+            <select id="log-lines" onchange="loadLogs()">
+              <option value="50">最近 50 行</option>
+              <option value="100" selected>最近 100 行</option>
+              <option value="200">最近 200 行</option>
+              <option value="500">最近 500 行</option>
+            </select>
+            <button class="btn-refresh-small" onclick="loadLogs()">🔄 刷新</button>
+          </div>
+        </div>
+        
+        <div class="log-viewer">
+          <pre id="log-content">加载中...</pre>
+        </div>
+      </section>
+      
+      <!-- 配置编辑页 -->
+      <section id="page-config" class="page">
+        <div class="page-header">
+          <h1>配置编辑</h1>
+          <div class="config-actions">
+            <span class="config-status" id="config-status"></span>
+            <button class="btn-save" onclick="saveConfig()">💾 保存</button>
+          </div>
+        </div>
+        
+        <div class="config-editor">
+          <div class="config-section">
+            <div class="config-toolbar">
+              <button class="btn-format" onclick="formatConfig()">格式化</button>
+              <button class="btn-validate" onclick="validateConfig()">校验</button>
+              <button class="btn-open-folder" onclick="openConfigFolder()">打开目录</button>
+            </div>
+            <textarea id="config-editor" placeholder="加载中..."></textarea>
+          </div>
+        </div>
+      </section>
+      
+      <!-- 记忆管理页 -->
+      <section id="page-memory" class="page">
+        <div class="page-header">
+          <h1>记忆管理</h1>
+          <div class="memory-actions">
+            <span class="memory-size" id="memory-size">总计: 0 KB</span>
+            <button class="btn-clear-temp" onclick="clearTempMemory()">🗑️ 清理临时记忆</button>
+          </div>
+        </div>
+        
+        <div class="memory-list" id="memory-list">
+          <div class="loading">加载中...</div>
+        </div>
+      </section>
+      
+      <!-- 技能市场页 -->
+      <section id="page-skills" class="page">
+        <div class="page-header">
+          <h1>技能市场</h1>
+          <button class="btn-install-skill" onclick="installNewSkill()">➕ 安装技能</button>
+        </div>
+        
+        <div class="skills-grid" id="skills-grid">
+          <div class="loading">加载中...</div>
+        </div>
+      </section>
+      
+      <!-- 快捷命令页 -->
+      <section id="page-commands" class="page">
+        <div class="page-header">
+          <h1>快捷命令</h1>
+        </div>
+        
+        <div class="commands-grid">
+          <div class="command-card" onclick="runCommand('restart-gateway')">
+            <div class="command-icon">🔄</div>
+            <div class="command-name">重启 Gateway</div>
+            <div class="command-desc">重启 OpenClaw 网关服务</div>
+          </div>
+          
+          <div class="command-card" onclick="runCommand('restart-node')">
+            <div class="command-icon">🔄</div>
+            <div class="command-name">重启 Node</div>
+            <div class="command-desc">重启 OpenClaw 节点服务</div>
+          </div>
+          
+          <div class="command-card" onclick="runCommand('restart-all')">
+            <div class="command-icon">🔃</div>
+            <div class="command-name">重启全部</div>
+            <div class="command-desc">同时重启 Gateway 和 Node</div>
+          </div>
+          
+          <div class="command-card" onclick="runCommand('open-dashboard')">
+            <div class="command-icon">🌐</div>
+            <div class="command-name">打开 Dashboard</div>
+            <div class="command-desc">在浏览器中打开 Web UI</div>
+          </div>
+          
+          <div class="command-card" onclick="runCommand('open-config')">
+            <div class="command-icon">📁</div>
+            <div class="command-name">打开配置目录</div>
+            <div class="command-desc">在 Finder 中显示配置文件夹</div>
+          </div>
+          
+          <div class="command-card" onclick="runCommand('clear-memory')">
+            <div class="command-icon">🧹</div>
+            <div class="command-name">清理临时记忆</div>
+            <div class="command-desc">删除临时记忆文件（保留 MEMORY.md）</div>
+          </div>
+          
+          <div class="command-card" onclick="runCommand('update-openclaw')">
+            <div class="command-icon">⬆️</div>
+            <div class="command-name">更新 OpenClaw</div>
+            <div class="command-desc">升级到最新版本</div>
+          </div>
+          
+          <div class="command-card" onclick="loadLogs(); navigateTo('logs');">
+            <div class="command-icon">📋</div>
+            <div class="command-name">查看日志</div>
+            <div class="command-desc">打开实时日志面板</div>
+          </div>
+        </div>
+        
+        <div class="command-output" id="command-output" style="display: none;">
+          <div class="output-header">执行结果</div>
+          <pre id="output-content"></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+  
+  <script src="app.js"></script>
+</body>
+</html>
