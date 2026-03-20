@@ -15,6 +15,14 @@ contextBridge.exposeInMainWorld('qclawAPI', {
   
   // 统计
   getTokenStats: () => ipcRenderer.invoke('get-token-stats'),
+  getTokenHistory: () => ipcRenderer.invoke('get-token-history'),
+  
+  // 模型管理
+  getModelConfig: () => ipcRenderer.invoke('get-model-config'),
+  updateModelConfig: (provider, modelId, updates) => ipcRenderer.invoke('update-model-config', provider, modelId, updates),
+  switchModel: (provider, modelId) => ipcRenderer.invoke('switch-model', provider, modelId),
+  addModel: (provider, config) => ipcRenderer.invoke('add-model', provider, config),
+  deleteModel: (provider, modelId) => ipcRenderer.invoke('delete-model', provider, modelId),
   
   // 内存管理
   getMemoryFiles: () => ipcRenderer.invoke('get-memory-files'),
@@ -22,6 +30,7 @@ contextBridge.exposeInMainWorld('qclawAPI', {
   
   // Skills
   getSkills: () => ipcRenderer.invoke('get-skills'),
+  installSkill: (name) => ipcRenderer.invoke('install-skill', name),
   installSkill: (name) => ipcRenderer.invoke('install-skill', name),
   
   // 日志

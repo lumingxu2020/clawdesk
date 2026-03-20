@@ -9,7 +9,7 @@ const log = require('electron-log');
 log.transports.file.level = 'info';
 log.transports.file.maxSize = 10 * 1024 * 1024;
 log.transports.console.level = 'debug';
-log.info('QClaw Desktop 启动... v1.1.0');
+log.info('QClaw Desktop 启动... v1.3.0');
 
 // 全局变量
 let mainWindow;
@@ -17,7 +17,9 @@ let mainWindow;
 // OpenClaw 路径
 const OPENCLAW_DIR = path.join(process.env.HOME, '.openclaw');
 const OPENCLAW_CONFIG = path.join(OPENCLAW_DIR, 'openclaw.json');
-const MEMORY_DIR = path.join(OPENCLAW_DIR, 'memory');
+const MEMORY_DIR = path.join(OPENCLAW_DIR, 'workspace', 'memory');
+const GATEWAY_LOG = path.join(OPENCLAW_DIR, 'logs', 'gateway.log');
+const TOKEN_STATS_FILE = path.join(OPENCLAW_DIR, 'token-stats.json');
 
 // 创建窗口
 function createWindow() {
@@ -214,6 +216,230 @@ async function saveConfig(configStr) {
   }
 }
 
+// 获取模型配置
+async function getModelConfig() {
+  try {
+    if (!fs.existsSync(OPENCLAW_CONFIG)) {
+      return { success: false, error: '配置文件不存在' };
+    }
+    
+    const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf-8'));
+    // 兼容新旧配置结构
+    const providers = config.models?.providers || config.providers || {};
+    const defaults = config.agents?.defaults || {};
+    
+    const models = [];
+    for (const [providerName, providerData] of Object.entries(providers)) {
+      if (providerData.models) {
+        for (const model of providerData.models) {
+          const isDefault = defaults.model?.primary === `${providerName}/${model.id}`;
+          models.push({
+            provider: providerName,
+            id: model.id,
+            name: model.name || model.id,
+            reasoning: model.reasoning || false,
+            inputCost: model.cost?.input || 0,
+            outputCost: model.cost?.output || 0,
+            cacheReadCost: model.cost?.cacheRead || 0,
+            cacheWriteCost: model.cost?.cacheWrite || 0,
+            contextWindow: model.contextWindow || 0,
+            maxTokens: model.maxTokens || 0,
+            isDefault
+          });
+        }
+      }
+    }
+    
+    return {
+      success: true,
+      models,
+      defaultModel: defaults.model?.primary || null,
+      providers: Object.keys(providers)
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 更新模型配置
+async function updateModelConfig(provider, modelId, updates) {
+  try {
+    if (!fs.existsSync(OPENCLAW_CONFIG)) {
+      return { success: false, error: '配置文件不存在' };
+    }
+    
+    const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf-8'));
+    
+    // 兼容新旧配置结构
+    const providers = config.models?.providers || config.providers || {};
+    
+    if (!providers[provider]) {
+      return { success: false, error: '提供商不存在' };
+    }
+    
+    const modelIndex = providers[provider].models?.findIndex(m => m.id === modelId);
+    
+    if (modelIndex === -1 || modelIndex === undefined) {
+      return { success: false, error: '模型不存在' };
+    }
+    
+    // 更新模型配置
+    providers[provider].models[modelIndex] = {
+      ...providers[provider].models[modelIndex],
+      ...updates
+    };
+    
+    // 确保写回正确的位置
+    if (config.models?.providers) {
+      config.models.providers = providers;
+    } else {
+      config.providers = providers;
+    }
+    
+    fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2));
+    return { success: true, message: '模型配置已更新' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 切换默认模型
+async function switchModel(provider, modelId) {
+  try {
+    if (!fs.existsSync(OPENCLAW_CONFIG)) {
+      return { success: false, error: '配置文件不存在' };
+    }
+    
+    const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf-8'));
+    
+    // 确保 agents.defaults 存在
+    if (!config.agents) {
+      config.agents = {};
+    }
+    if (!config.agents.defaults) {
+      config.agents.defaults = {};
+    }
+    if (!config.agents.defaults.model) {
+      config.agents.defaults.model = {};
+    }
+    
+    // 设置新的默认模型
+    config.agents.defaults.model.primary = `${provider}/${modelId}`;
+    
+    // 更新 aliases
+    if (!config.agents.defaults.models) {
+      config.agents.defaults.models = {};
+    }
+    config.agents.defaults.models[`${provider}/${modelId}`] = {
+      alias: modelId
+    };
+    
+    fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2));
+    
+    // 通知重启
+    return { success: true, message: '默认模型已切换，请重启 Gateway 使配置生效', needRestart: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 添加新模型
+async function addModel(provider, modelConfig) {
+  try {
+    if (!fs.existsSync(OPENCLAW_CONFIG)) {
+      return { success: false, error: '配置文件不存在' };
+    }
+    
+    const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf-8'));
+    
+    // 兼容新旧配置结构 - 确保 providers 存在
+    if (!config.models) config.models = {};
+    if (!config.models.providers) config.models.providers = {};
+    const providers = config.models.providers;
+    
+    if (!providers[provider]) {
+      providers[provider] = { models: [] };
+    }
+    if (!providers[provider].models) {
+      providers[provider].models = [];
+    }
+    
+    // 检查是否已存在
+    const exists = providers[provider].models.find(m => m.id === modelConfig.id);
+    if (exists) {
+      return { success: false, error: '模型已存在' };
+    }
+    
+    // 添加模型
+    providers[provider].models.push({
+      id: modelConfig.id,
+      name: modelConfig.name || modelConfig.id,
+      reasoning: modelConfig.reasoning || false,
+      input: ['text'],
+      cost: {
+        input: modelConfig.inputCost || 0,
+        output: modelConfig.outputCost || 0,
+        cacheRead: modelConfig.cacheReadCost || 0,
+        cacheWrite: modelConfig.cacheWriteCost || 0
+      },
+      contextWindow: modelConfig.contextWindow || 200000,
+      maxTokens: modelConfig.maxTokens || 8192
+    });
+    
+    fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2));
+    return { success: true, message: '模型已添加' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 删除模型
+async function deleteModel(provider, modelId) {
+  try {
+    if (!fs.existsSync(OPENCLAW_CONFIG)) {
+      return { success: false, error: '配置文件不存在' };
+    }
+    
+    const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf-8'));
+    
+    // 兼容新旧配置结构
+    const providers = config.models?.providers || config.providers || {};
+    
+    if (!providers[provider]) {
+      return { success: false, error: '提供商不存在' };
+    }
+    
+    const models = providers[provider].models || [];
+    const filteredModels = models.filter(m => m.id !== modelId);
+    
+    if (filteredModels.length === models.length) {
+      return { success: false, error: '模型不存在' };
+    }
+    
+    providers[provider].models = filteredModels;
+    
+    // 确保写回正确的位置
+    if (config.models?.providers) {
+      config.models.providers = providers;
+    } else {
+      config.providers = providers;
+    }
+    
+    // 如果删除的是默认模型，清除默认配置
+    const defaultModel = config.agents?.defaults?.model?.primary;
+    if (defaultModel === `${provider}/${modelId}`) {
+      if (config.agents.defaults.model) {
+        config.agents.defaults.model.primary = '';
+      }
+    }
+    
+    fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2));
+    return { success: true, message: '模型已删除' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
 // 获取 Token 统计
 async function getTokenStats() {
   try {
@@ -293,20 +519,40 @@ async function deleteMemoryFile(filename) {
 async function getSkillsList() {
   try {
     const skillsDir = path.join(OPENCLAW_DIR, 'workspace', 'skills');
-    if (fs.existsSync(skillsDir)) {
-      const skills = fs.readdirSync(skillsDir);
-      const skillDetails = [];
-      
-      for (const skill of skills) {
+    if (!fs.existsSync(skillsDir)) {
+      return { success: true, skills: [], count: 0 };
+    }
+    
+    const skills = fs.readdirSync(skillsDir);
+    const skillDetails = [];
+    
+    for (const skill of skills) {
+      try {
         const skillPath = path.join(skillsDir, skill);
-        const stat = fs.statSync(skillPath);
+        
+        // 使用 lstatSync 处理符号链接
+        let stat;
+        try {
+          stat = fs.lstatSync(skillPath);
+        } catch {
+          // 跳过无法访问的技能
+          continue;
+        }
+        
+        // 跳过非目录项（如符号链接指向不存在的路径）
+        if (!stat.isDirectory()) {
+          continue;
+        }
+        
         const skillFile = path.join(skillPath, 'SKILL.md');
         let description = '';
         
         if (fs.existsSync(skillFile)) {
-          const content = fs.readFileSync(skillFile, 'utf-8');
-          const match = content.match(/description[^\n]*([^\n]+)/);
-          description = match ? match[1].trim() : '';
+          try {
+            const content = fs.readFileSync(skillFile, 'utf-8');
+            const match = content.match(/description[^\n]*([^\n]+)/);
+            description = match ? match[1].trim() : '';
+          } catch {}
         }
         
         skillDetails.push({
@@ -315,12 +561,15 @@ async function getSkillsList() {
           size: stat.size,
           description
         });
+      } catch {
+        // 跳过有问题的技能
+        continue;
       }
-      
-      return { success: true, skills: skillDetails, count: skillDetails.length };
     }
-    return { success: true, skills: [], count: 0 };
+    
+    return { success: true, skills: skillDetails, count: skillDetails.length };
   } catch (error) {
+    log.error('获取技能列表失败:', error);
     return { success: false, error: error.message };
   }
 }
@@ -432,6 +681,176 @@ async function getSystemResources() {
   }
 }
 
+// 获取 Token 统计数据
+async function getTokenStats() {
+  try {
+    // 读取模型配置获取价格
+    let inputPrice = 0.4; // 默认 MiniMax M2.7
+    let outputPrice = 1.5;
+    
+    if (fs.existsSync(OPENCLAW_CONFIG)) {
+      const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf-8'));
+      // 兼容新旧配置结构
+      const providers = config.models?.providers || config.providers || {};
+      for (const [name, data] of Object.entries(providers)) {
+        if (data.models && data.models.length > 0) {
+          inputPrice = data.models[0].cost?.input || inputPrice;
+          outputPrice = data.models[0].cost?.output || outputPrice;
+          break;
+        }
+      }
+    }
+    
+    // 解析日志获取使用量
+    const stats = {
+      today: { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
+      week: { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
+      month: { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
+      total: { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0 },
+      inputPrice,
+      outputPrice,
+      lastUpdated: new Date().toISOString()
+    };
+    
+    // 读取统计缓存文件
+    let cachedStats = {};
+    if (fs.existsSync(TOKEN_STATS_FILE)) {
+      try {
+        cachedStats = JSON.parse(fs.readFileSync(TOKEN_STATS_FILE, 'utf-8'));
+      } catch {}
+    }
+    
+    // 读取网关日志
+    if (fs.existsSync(GATEWAY_LOG)) {
+      const logContent = fs.readFileSync(GATEWAY_LOG, 'utf-8');
+      const lines = logContent.split('\n');
+      
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const weekStart = todayStart - 7 * 24 * 60 * 60 * 1000;
+      const monthStart = todayStart - 30 * 24 * 60 * 60 * 1000;
+      
+      // 解析日志行
+      for (const line of lines) {
+        // 匹配 MiniMax API 调用日志
+        // 格式示例: [minimax] req id=xxx duration=xxxms input_tokens=xxx output_tokens=xxx
+        const match = line.match(/input_tokens[=:]?\s*(\d+).*output_tokens[=:]?\s*(\d+)/i);
+        if (match) {
+          const inputTokens = parseInt(match[1]) || 0;
+          const outputTokens = parseInt(match[2]) || 0;
+          const timestamp = parseLogTimestamp(line) || now.getTime();
+          
+          const cost = (inputTokens / 1000) * inputPrice + (outputTokens / 1000) * outputPrice;
+          
+          stats.total.requests++;
+          stats.total.inputTokens += inputTokens;
+          stats.total.outputTokens += outputTokens;
+          stats.total.cost += cost;
+          
+          if (timestamp >= todayStart) {
+            stats.today.requests++;
+            stats.today.inputTokens += inputTokens;
+            stats.today.outputTokens += outputTokens;
+            stats.today.cost += cost;
+          }
+          
+          if (timestamp >= weekStart) {
+            stats.week.requests++;
+            stats.week.inputTokens += inputTokens;
+            stats.week.outputTokens += outputTokens;
+            stats.week.cost += cost;
+          }
+          
+          if (timestamp >= monthStart) {
+            stats.month.requests++;
+            stats.month.inputTokens += inputTokens;
+            stats.month.outputTokens += outputTokens;
+            stats.month.cost += cost;
+          }
+        }
+      }
+    }
+    
+    // 合并缓存数据（用于补充未记录的历史数据）
+    if (cachedStats.total) {
+      stats.total = cachedStats.total;
+      stats.today = cachedStats.today || stats.today;
+      stats.week = cachedStats.week || stats.week;
+      stats.month = cachedStats.month || stats.month;
+    }
+    
+    // 保存更新后的统计
+    fs.writeFileSync(TOKEN_STATS_FILE, JSON.stringify(stats, null, 2));
+    
+    return stats;
+  } catch (error) {
+    log.error('获取Token统计失败:', error);
+    return { error: error.message };
+  }
+}
+
+// 解析日志时间戳
+function parseLogTimestamp(line) {
+  // 尝试从日志行中提取时间戳
+  // 格式: 2026-03-19T10:25:43.214+08:00
+  const match = line.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/);
+  if (match) {
+    return new Date(match[1]).getTime();
+  }
+  return null;
+}
+
+// 获取 Token 统计历史
+async function getTokenHistory() {
+  try {
+    const history = {
+      daily: [],
+      labels: []
+    };
+    
+    // 从日志中提取每日使用量
+    if (fs.existsSync(GATEWAY_LOG)) {
+      const logContent = fs.readFileSync(GATEWAY_LOG, 'utf-8');
+      const lines = logContent.split('\n');
+      
+      // 按天统计
+      const dailyStats = {};
+      
+      for (const line of lines) {
+        const match = line.match(/input_tokens[=:]?\s*(\d+).*output_tokens[=:]?\s*(\d+)/i);
+        if (match) {
+          const timestamp = parseLogTimestamp(line);
+          if (timestamp) {
+            const date = new Date(timestamp);
+            const dateStr = `${date.getMonth() + 1}/${date.getDate()}`;
+            
+            if (!dailyStats[dateStr]) {
+              dailyStats[dateStr] = { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0 };
+            }
+            
+            dailyStats[dateStr].requests++;
+            dailyStats[dateStr].inputTokens += parseInt(match[1]) || 0;
+            dailyStats[dateStr].outputTokens += parseInt(match[2]) || 0;
+          }
+        }
+      }
+      
+      // 转换为数组
+      const sortedDates = Object.keys(dailyStats).sort();
+      const last7Days = sortedDates.slice(-7);
+      
+      for (const date of last7Days) {
+        history.daily.push(dailyStats[date]);
+        history.labels.push(date);
+      }
+    }
+    
+    return history;
+  } catch (error) {
+    return { daily: [], labels: [] };
+  }
+}
+
 // IPC 处理器
 ipcMain.handle('get-status', getOpenClawStatus);
 ipcMain.handle('get-process-details', getProcessDetails);
@@ -445,12 +864,18 @@ ipcMain.handle('install-skill', async (event, skillName) => installSkill(skillNa
 ipcMain.handle('get-logs', async (event, lines) => getLogs(lines));
 ipcMain.handle('execute-command', async (event, cmd) => executeCommand(cmd));
 ipcMain.handle('get-system-resources', getSystemResources);
+ipcMain.handle('get-token-history', getTokenHistory);
+ipcMain.handle('get-model-config', getModelConfig);
+ipcMain.handle('update-model-config', async (event, provider, modelId, updates) => updateModelConfig(provider, modelId, updates));
+ipcMain.handle('switch-model', async (event, provider, modelId) => switchModel(provider, modelId));
+ipcMain.handle('add-model', async (event, provider, config) => addModel(provider, config));
+ipcMain.handle('delete-model', async (event, provider, modelId) => deleteModel(provider, modelId));
 ipcMain.handle('open-external', async (event, url) => shell.openExternal(url));
 
 // 应用启动
 app.whenReady().then(() => {
   createWindow();
-  log.info('应用已就绪 v1.1.0');
+  log.info('应用已就绪 v1.3.0');
 });
 
 app.on('window-all-closed', () => {

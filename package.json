@@ -1,6 +1,6 @@
 {
   "name": "qclaw-desktop",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "description": "QClaw Desktop - OpenClaw图形化管理工具",
   "main": "src/main/main.js",
   "scripts": {

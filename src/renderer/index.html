@@ -44,10 +44,18 @@
           <span class="nav-icon">⚡</span>
           <span>快捷命令</span>
         </button>
+        <button class="nav-item" data-page="stats">
+          <span class="nav-icon">💰</span>
+          <span>Token统计</span>
+        </button>
+        <button class="nav-item" data-page="models">
+          <span class="nav-icon">🤖</span>
+          <span>模型配置</span>
+        </button>
       </nav>
       
       <div class="sidebar-footer">
-        <div class="version">v1.1.0</div>
+        <div class="version">v1.3.0</div>
       </div>
     </aside>
     
@@ -272,6 +280,205 @@
         <div class="command-output" id="command-output" style="display: none;">
           <div class="output-header">执行结果</div>
           <pre id="output-content"></pre>
+        </div>
+      </section>
+      
+      <!-- 模型配置页 -->
+      <section id="page-models" class="page">
+        <div class="page-header">
+          <h1>🤖 大模型配置</h1>
+          <button class="btn-add-model" onclick="showAddModelDialog()">➕ 添加模型</button>
+        </div>
+        
+        <div class="current-model">
+          <h2>当前默认模型</h2>
+          <div class="model-badge" id="current-default-model">
+            <span class="model-provider">-</span>
+            <span class="model-name">-</span>
+          </div>
+          <button class="btn-restart" onclick="restartGateway()">🔄 重启 Gateway 使配置生效</button>
+        </div>
+        
+        <div class="models-list">
+          <h2>已配置模型</h2>
+          <div id="models-container">
+            <div class="loading">加载中...</div>
+          </div>
+        </div>
+        
+        <div class="model-actions" id="model-actions" style="display: none;">
+          <h2>编辑模型</h2>
+          <div class="model-form" id="model-form">
+            <div class="form-group">
+              <label>模型 ID</label>
+              <input type="text" id="model-id" disabled>
+            </div>
+            <div class="form-group">
+              <label>显示名称</label>
+              <input type="text" id="model-name">
+            </div>
+            <div class="form-group">
+              <label>输入价格 ($/1K tokens)</label>
+              <input type="number" id="model-input-cost" step="0.001">
+            </div>
+            <div class="form-group">
+              <label>输出价格 ($/1K tokens)</label>
+              <input type="number" id="model-output-cost" step="0.001">
+            </div>
+            <div class="form-group">
+              <label>上下文窗口</label>
+              <input type="number" id="model-context">
+            </div>
+            <div class="form-group">
+              <label>最大输出</label>
+              <input type="number" id="model-max-tokens">
+            </div>
+            <div class="form-group checkbox">
+              <label><input type="checkbox" id="model-reasoning"> 支持推理</label>
+            </div>
+            <div class="form-buttons">
+              <button class="btn-save-model" onclick="saveModelConfig()">💾 保存</button>
+              <button class="btn-cancel" onclick="hideModelForm()">取消</button>
+              <button class="btn-delete" onclick="deleteCurrentModel()">🗑️ 删除</button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 添加模型对话框 -->
+        <div class="dialog-overlay" id="add-model-dialog" style="display: none;">
+          <div class="dialog">
+            <div class="dialog-header">
+              <h3>添加新模型</h3>
+              <button class="dialog-close" onclick="hideAddModelDialog()">×</button>
+            </div>
+            <div class="dialog-body">
+              <div class="form-group">
+                <label>提供商</label>
+                <select id="add-provider">
+                  <option value="minimax-cn">MiniMax</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>模型 ID</label>
+                <input type="text" id="add-model-id" placeholder="如: MiniMax-M2.7">
+              </div>
+              <div class="form-group">
+                <label>显示名称</label>
+                <input type="text" id="add-model-name" placeholder="如: MiniMax M2.7">
+              </div>
+              <div class="form-group">
+                <label>输入价格 ($/1K tokens)</label>
+                <input type="number" id="add-input-cost" value="0.4" step="0.001">
+              </div>
+              <div class="form-group">
+                <label>输出价格 ($/1K tokens)</label>
+                <input type="number" id="add-output-cost" value="1.5" step="0.001">
+              </div>
+            </div>
+            <div class="dialog-footer">
+              <button class="btn-save" onclick="addNewModel()">添加</button>
+              <button class="btn-cancel" onclick="hideAddModelDialog()">取消</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      
+      <!-- Token统计页 -->
+      <section id="page-stats" class="page">
+        <div class="page-header">
+          <h1>💰 Token 消耗统计</h1>
+          <button class="btn-refresh" onclick="loadTokenStats()">🔄 刷新</button>
+        </div>
+        
+        <div class="stats-overview">
+          <div class="stat-card primary">
+            <div class="stat-label">今日消耗</div>
+            <div class="stat-value" id="stat-today-cost">¥0.00</div>
+            <div class="stat-detail">
+              <span id="stat-today-tokens">0</span> tokens
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">本周消耗</div>
+            <div class="stat-value" id="stat-week-cost">¥0.00</div>
+            <div class="stat-detail">
+              <span id="stat-week-tokens">0</span> tokens
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">本月消耗</div>
+            <div class="stat-value" id="stat-month-cost">¥0.00</div>
+            <div class="stat-detail">
+              <span id="stat-month-tokens">0</span> tokens
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">累计消耗</div>
+            <div class="stat-value" id="stat-total-cost">¥0.00</div>
+            <div class="stat-detail">
+              <span id="stat-total-tokens">0</span> tokens
+            </div>
+          </div>
+        </div>
+        
+        <div class="stats-chart">
+          <h2>📈 近7天消耗趋势</h2>
+          <div class="chart-container" id="chart-container">
+            <div class="chart-placeholder">加载中...</div>
+          </div>
+        </div>
+        
+        <div class="stats-table">
+          <h2>📋 使用明细</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>时间范围</th>
+                <th>请求次数</th>
+                <th>输入 Tokens</th>
+                <th>输出 Tokens</th>
+                <th>预估费用</th>
+              </tr>
+            </thead>
+            <tbody id="stats-tbody">
+              <tr>
+                <td>今日</td>
+                <td id="tbl-today-requests">-</td>
+                <td id="tbl-today-input">-</td>
+                <td id="tbl-today-output">-</td>
+                <td id="tbl-today-cost">-</td>
+              </tr>
+              <tr>
+                <td>本周</td>
+                <td id="tbl-week-requests">-</td>
+                <td id="tbl-week-input">-</td>
+                <td id="tbl-week-output">-</td>
+                <td id="tbl-week-cost">-</td>
+              </tr>
+              <tr>
+                <td>本月</td>
+                <td id="tbl-month-requests">-</td>
+                <td id="tbl-month-input">-</td>
+                <td id="tbl-month-output">-</td>
+                <td id="tbl-month-cost">-</td>
+              </tr>
+              <tr>
+                <td>累计</td>
+                <td id="tbl-total-requests">-</td>
+                <td id="tbl-total-input">-</td>
+                <td id="tbl-total-output">-</td>
+                <td id="tbl-total-cost">-</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="stats-note">
+          <p>* 费用为估算值，实际费用以各平台账单为准</p>
+          <p>* 基于日志解析计算，可能存在误差</p>
         </div>
       </section>
     </main>
