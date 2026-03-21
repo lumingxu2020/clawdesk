@@ -31,13 +31,30 @@ contextBridge.exposeInMainWorld('qclawAPI', {
   // Skills
   getSkills: () => ipcRenderer.invoke('get-skills'),
   installSkill: (name) => ipcRenderer.invoke('install-skill', name),
-  installSkill: (name) => ipcRenderer.invoke('install-skill', name),
   
   // 日志
   getLogs: (lines) => ipcRenderer.invoke('get-logs', lines),
   
   // 命令执行
   executeCommand: (cmd) => ipcRenderer.invoke('execute-command', cmd),
+  
+  // IM 渠道配置
+  getChannelConfig: () => ipcRenderer.invoke('get-channel-config'),
+  updateChannelConfig: (platform, updates) => ipcRenderer.invoke('update-channel-config', platform, updates),
+  toggleChannel: (platform, enabled) => ipcRenderer.invoke('toggle-channel', platform, enabled),
+  
+  // 备份与恢复
+  getBackupList: () => ipcRenderer.invoke('get-backup-list'),
+  createBackup: (name) => ipcRenderer.invoke('create-backup', name),
+  restoreBackup: (backupName) => ipcRenderer.invoke('restore-backup', backupName),
+  deleteBackup: (backupName) => ipcRenderer.invoke('delete-backup', backupName),
+  exportConfig: (targetPath) => ipcRenderer.invoke('export-config', targetPath),
+  importConfig: (sourcePath) => ipcRenderer.invoke('import-config', sourcePath),
+  
+  // 增强网关管理
+  forceRestartGateway: () => ipcRenderer.invoke('force-restart-gateway'),
+  selfCheckAndRepair: () => ipcRenderer.invoke('self-check-and-repair'),
+  getGatewayDiagnostics: () => ipcRenderer.invoke('get-gateway-diagnostics'),
   
   // 外部链接
   openExternal: (url) => ipcRenderer.invoke('open-external', url)

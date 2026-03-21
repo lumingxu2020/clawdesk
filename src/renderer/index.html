@@ -52,10 +52,22 @@
           <span class="nav-icon">🤖</span>
           <span>模型配置</span>
         </button>
+        <button class="nav-item" data-page="channels">
+          <span class="nav-icon">📮</span>
+          <span>IM渠道</span>
+        </button>
+        <button class="nav-item" data-page="backup">
+          <span class="nav-icon">💾</span>
+          <span>备份恢复</span>
+        </button>
+        <button class="nav-item" data-page="gateway">
+          <span class="nav-icon">🛠️</span>
+          <span>网关工具</span>
+        </button>
       </nav>
       
       <div class="sidebar-footer">
-        <div class="version">v1.3.0</div>
+        <div class="version">v1.4.0</div>
       </div>
     </aside>
     
@@ -479,6 +491,101 @@
         <div class="stats-note">
           <p>* 费用为估算值，实际费用以各平台账单为准</p>
           <p>* 基于日志解析计算，可能存在误差</p>
+        </div>
+      </section>
+
+      <!-- IM渠道配置页 -->
+      <section id="page-channels" class="page">
+        <div class="page-header">
+          <h1>📮 IM 渠道配置</h1>
+          <button class="btn-refresh" onclick="loadChannelConfig()">🔄 刷新</button>
+        </div>
+
+        <div class="channel-intro">
+          <p>配置 AI 助手接入主流 IM 平台，实现通过聊天软件与 AI 对话</p>
+        </div>
+
+        <div class="channel-list" id="channel-list">
+          <div class="loading">加载中...</div>
+        </div>
+
+        <div class="channel-detail" id="channel-detail" style="display: none;">
+          <h2 id="channel-detail-title">配置</h2>
+          <div class="channel-form" id="channel-form"></div>
+        </div>
+      </section>
+
+      <!-- 备份恢复页 -->
+      <section id="page-backup" class="page">
+        <div class="page-header">
+          <h1>💾 配置备份与恢复</h1>
+          <button class="btn-refresh" onclick="loadBackupList()">🔄 刷新</button>
+        </div>
+
+        <div class="backup-actions">
+          <button class="btn-primary" onclick="createManualBackup()">📦 创建备份</button>
+          <button class="btn-secondary" onclick="exportConfigFile()">📤 导出配置</button>
+          <button class="btn-secondary" onclick="importConfigFile()">📥 导入配置</button>
+        </div>
+
+        <div class="backup-list">
+          <h2>📋 备份历史</h2>
+          <div id="backup-container">
+            <div class="loading">加载中...</div>
+          </div>
+        </div>
+
+        <div class="backup-tips">
+          <h3>💡 提示</h3>
+          <ul>
+            <li>建议在修改重要配置前创建备份</li>
+            <li>自动备份会在导入配置前创建</li>
+            <li>恢复配置后需要重启 Gateway 使配置生效</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 网关工具页 -->
+      <section id="page-gateway" class="page">
+        <div class="page-header">
+          <h1>🛠️ 网关管理工具</h1>
+          <button class="btn-refresh" onclick="loadGatewayDiagnostics()">🔄 刷新</button>
+        </div>
+
+        <div class="gateway-tools">
+          <div class="tool-card main-tool">
+            <h2>🚀 一键修复</h2>
+            <p>这三个按钮能解决 90% 的问题</p>
+            <div class="tool-buttons">
+              <button class="btn-restart" onclick="restartGateway()">🔄 重启网关</button>
+              <button class="btn-force" onclick="forceRestartGateway()">⚡ 强制重启</button>
+              <button class="btn-repair" onclick="selfCheckAndRepair()">🔧 自检修复</button>
+            </div>
+          </div>
+
+          <div class="tool-card">
+            <h2>📊 诊断信息</h2>
+            <div id="diagnostics-info">
+              <div class="loading">加载中...</div>
+            </div>
+          </div>
+
+          <div class="tool-card">
+            <h2>📋 自检结果</h2>
+            <div id="self-check-results" class="check-results">
+              <p class="hint">点击"自检修复"按钮开始诊断</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="gateway-tips">
+          <h3>💡 常见问题</h3>
+          <table class="tips-table">
+            <tr><th>问题</th><th>解决方法</th></tr>
+            <tr><td>网关报错/404</td><td>先点「重启网关」，不行再「强制重启」，最后「自检修复」</td></tr>
+            <tr><td>对话无响应</td><td>检查 API Key 配置，重启网关</td></tr>
+            <tr><td>IM 渠道无法使用</td><td>在 IM渠道页面检查配置，重启网关</td></tr>
+          </table>
         </div>
       </section>
     </main>

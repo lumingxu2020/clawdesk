@@ -17,13 +17,13 @@ function navigateTo(page) {
   // 更新导航状态
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
   document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
-  
+
   // 更新页面显示
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById(`page-${page}`)?.classList.add('active');
-  
+
   currentPage = page;
-  
+
   // 页面特定初始化
   switch (page) {
     case 'dashboard':
@@ -50,8 +50,17 @@ function navigateTo(page) {
     case 'models':
       loadModels();
       break;
+    case 'channels':
+      loadChannelConfig();
+      break;
+    case 'backup':
+      loadBackupList();
+      break;
+    case 'gateway':
+      loadGatewayDiagnostics();
+      break;
   }
-  
+
   // 重置自动刷新
   resetAutoRefresh();
 }
@@ -790,6 +799,407 @@ style.textContent = `
   }
 `;
 document.head.appendChild(style);
+
+// ========== IM 渠道配置 ==========
+
+const IM_PLATFORMS = {
+  feishu: { name: '飞书', icon: '📮', fields: ['appId', 'appSecret', 'botToken', 'verificationToken'] },
+  dingtalk: { name: '钉钉', icon: '💬', fields: ['clientId', 'clientSecret', 'botToken'] },
+  qq: { name: 'QQ', icon: '🐧', fields: ['botToken', 'appSecret'] },
+  wecom: { name: '企业微信', icon: '💼', fields: ['corpId', 'corpSecret', 'agentId', 'token', 'encodingAesKey'] }
+};
+
+async function loadChannelConfig() {
+  const container = document.getElementById('channel-list');
+  container.innerHTML = '<div class="loading">加载中...</div>';
+
+  try {
+    const result = await window.qclawAPI.getChannelConfig();
+
+    if (!result.success) {
+      container.innerHTML = `<div class="error">加载失败: ${result.error}</div>`;
+      return;
+    }
+
+    let html = '<div class="channel-grid">';
+    for (const [platform, info] of Object.entries(result.channels)) {
+      const platformInfo = IM_PLATFORMS[platform] || { name: platform, icon: '📱' };
+      html += `
+        <div class="channel-card ${info.enabled ? 'enabled' : ''}" onclick="openChannelDetail('${platform}')">
+          <div class="channel-icon">${platformInfo.icon}</div>
+          <div class="channel-name">${platformInfo.name}</div>
+          <div class="channel-status">
+            <span class="status-dot ${info.enabled ? 'active' : ''}"></span>
+            ${info.enabled ? '已启用' : '已禁用'}
+          </div>
+          <div class="channel-token">
+            ${info.hasToken ? '✓ 已配置' : '○ 未配置'}
+          </div>
+        </div>
+      `;
+    }
+    html += '</div>';
+    container.innerHTML = html;
+
+  } catch (error) {
+    container.innerHTML = `<div class="error">加载失败: ${error.message}</div>`;
+  }
+}
+
+let currentChannelPlatform = null;
+
+async function openChannelDetail(platform) {
+  currentChannelPlatform = platform;
+  const detail = document.getElementById('channel-detail');
+  const form = document.getElementById('channel-form');
+  const title = document.getElementById('channel-detail-title');
+
+  const platformInfo = IM_PLATFORMS[platform] || { name: platform, icon: '📱' };
+  title.textContent = `${platformInfo.icon} ${platformInfo.name} 配置`;
+
+  try {
+    const result = await window.qclawAPI.getChannelConfig();
+    const config = result.channels[platform];
+
+    let fieldsHtml = '';
+    for (const field of platformInfo.fields || []) {
+      const value = config.config[field] || '';
+      const isSecret = field.toLowerCase().includes('secret') || field.toLowerCase().includes('token') && field !== 'verificationToken';
+      fieldsHtml += `
+        <div class="form-group">
+          <label>${field}</label>
+          <input type="${isSecret ? 'password' : 'text'}" id="ch-${field}" value="${escapeHtml(value)}" placeholder="请输入 ${field}">
+        </div>
+      `;
+    }
+
+    form.innerHTML = `
+      <div class="form-group checkbox">
+        <label><input type="checkbox" id="ch-enabled" ${config.enabled ? 'checked' : ''}> 启用此渠道</label>
+      </div>
+      ${fieldsHtml}
+      <div class="form-buttons">
+        <button class="btn-save" onclick="saveChannelConfig('${platform}')">💾 保存</button>
+        <button class="btn-cancel" onclick="closeChannelDetail()">取消</button>
+      </div>
+    `;
+
+    detail.style.display = 'block';
+
+  } catch (error) {
+    form.innerHTML = `<div class="error">加载配置失败: ${error.message}</div>`;
+  }
+}
+
+function closeChannelDetail() {
+  document.getElementById('channel-detail').style.display = 'none';
+  currentChannelPlatform = null;
+}
+
+async function saveChannelConfig(platform) {
+  const enabled = document.getElementById('ch-enabled').checked;
+  const platformInfo = IM_PLATFORMS[platform];
+  const updates = { enabled };
+
+  for (const field of platformInfo.fields || []) {
+    const input = document.getElementById(`ch-${field}`);
+    if (input) {
+      updates[field] = input.value;
+    }
+  }
+
+  try {
+    const result = await window.qclawAPI.updateChannelConfig(platform, updates);
+
+    if (result.success) {
+      showNotification(result.message, 'success');
+      closeChannelDetail();
+      await loadChannelConfig();
+    } else {
+      showNotification('保存失败: ' + result.error, 'error');
+    }
+  } catch (error) {
+    showNotification('保存失败: ' + error.message, 'error');
+  }
+}
+
+// ========== 备份与恢复 ==========
+
+async function loadBackupList() {
+  const container = document.getElementById('backup-container');
+  container.innerHTML = '<div class="loading">加载中...</div>';
+
+  try {
+    const result = await window.qclawAPI.getBackupList();
+
+    if (!result.success) {
+      container.innerHTML = `<div class="error">加载失败: ${result.error}</div>`;
+      return;
+    }
+
+    if (result.backups.length === 0) {
+      container.innerHTML = '<div class="empty">暂无备份记录</div>';
+      return;
+    }
+
+    let html = '<div class="backup-items">';
+    for (const backup of result.backups) {
+      const date = new Date(backup.created);
+      const dateStr = date.toLocaleDateString('zh-CN');
+      const timeStr = date.toLocaleTimeString('zh-CN');
+      html += `
+        <div class="backup-item">
+          <div class="backup-info">
+            <div class="backup-name">${escapeHtml(backup.name)}</div>
+            <div class="backup-meta">
+              ${dateStr} ${timeStr} · ${formatSize(backup.size)}
+            </div>
+          </div>
+          <div class="backup-actions">
+            <button class="btn-small" onclick="restoreBackupFile('${escapeHtml(backup.name)}')">恢复</button>
+            <button class="btn-small danger" onclick="deleteBackupFile('${escapeHtml(backup.name)}')">删除</button>
+          </div>
+        </div>
+      `;
+    }
+    html += '</div>';
+    container.innerHTML = html;
+
+  } catch (error) {
+    container.innerHTML = `<div class="error">加载失败: ${error.message}</div>`;
+  }
+}
+
+async function createManualBackup() {
+  try {
+    const result = await window.qclawAPI.createBackup();
+
+    if (result.success) {
+      showNotification('✓ ' + result.message, 'success');
+      await loadBackupList();
+    } else {
+      showNotification('备份失败: ' + result.error, 'error');
+    }
+  } catch (error) {
+    showNotification('备份失败: ' + error.message, 'error');
+  }
+}
+
+async function restoreBackupFile(backupName) {
+  if (!confirm(`确定要恢复备份 "${backupName}" 吗？当前配置将自动备份。`)) {
+    return;
+  }
+
+  try {
+    const result = await window.qclawAPI.restoreBackup(backupName);
+
+    if (result.success) {
+      showNotification('✓ ' + result.message, 'success');
+      if (result.needRestart) {
+        await restartGateway();
+      }
+    } else {
+      showNotification('恢复失败: ' + result.error, 'error');
+    }
+  } catch (error) {
+    showNotification('恢复失败: ' + error.message, 'error');
+  }
+}
+
+async function deleteBackupFile(backupName) {
+  if (!confirm(`确定要删除备份 "${backupName}" 吗？此操作不可恢复。`)) {
+    return;
+  }
+
+  try {
+    const result = await window.qclawAPI.deleteBackup(backupName);
+
+    if (result.success) {
+      showNotification('✓ 备份已删除', 'success');
+      await loadBackupList();
+    } else {
+      showNotification('删除失败: ' + result.error, 'error');
+    }
+  } catch (error) {
+    showNotification('删除失败: ' + error.message, 'error');
+  }
+}
+
+async function exportConfigFile() {
+  const result = await window.qclawAPI.readConfig();
+  if (!result.success) {
+    showNotification('读取配置失败: ' + result.error, 'error');
+    return;
+  }
+
+  const blob = new Blob([result.config], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `openclaw-config-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showNotification('✓ 配置已导出', 'success');
+}
+
+async function importConfigFile() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const result = await window.qclawAPI.importConfig(file.path);
+        if (result.success) {
+          showNotification('✓ ' + result.message, 'success');
+          if (result.needRestart) {
+            await restartGateway();
+          }
+        } else {
+          showNotification('导入失败: ' + result.error, 'error');
+        }
+      } catch (error) {
+        showNotification('导入失败: ' + error.message, 'error');
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+// ========== 网关管理工具 ==========
+
+async function loadGatewayDiagnostics() {
+  const container = document.getElementById('diagnostics-info');
+  container.innerHTML = '<div class="loading">加载中...</div>';
+
+  try {
+    const result = await window.qclawAPI.getGatewayDiagnostics();
+
+    if (result.error) {
+      container.innerHTML = `<div class="error">加载失败: ${result.error}</div>`;
+      return;
+    }
+
+    const channels = Object.entries(result.channels || {})
+      .map(([k, v]) => `${k}: ${v.enabled ? '启用' : '禁用'}`)
+      .join(', ') || '无';
+
+    container.innerHTML = `
+      <div class="diagnostics-grid">
+        <div class="diag-item">
+          <span class="diag-label">检查时间</span>
+          <span class="diag-value">${new Date(result.timestamp).toLocaleString('zh-CN')}</span>
+        </div>
+        <div class="diag-item">
+          <span class="diag-label">配置版本</span>
+          <span class="diag-value">${result.config?.version || '-'}</span>
+        </div>
+        <div class="diag-item">
+          <span class="diag-label">已配置渠道</span>
+          <span class="diag-value">${channels}</span>
+        </div>
+        <div class="diag-item">
+          <span class="diag-label">AI 提供商</span>
+          <span class="diag-value">${result.config?.providers?.join(', ') || '-'}</span>
+        </div>
+      </div>
+      <div class="process-mini-list">
+        <strong>运行进程:</strong>
+        ${result.processes.map(p => `${p.name}(PID:${p.pid})`).join(', ') || '无'}
+      </div>
+    `;
+
+  } catch (error) {
+    container.innerHTML = `<div class="error">加载失败: ${error.message}</div>`;
+  }
+}
+
+async function restartGateway() {
+  showNotification('正在重启网关...', 'info');
+  try {
+    const result = await window.qclawAPI.executeCommand('restart-gateway');
+    if (result.success) {
+      showNotification('✓ 网关重启成功', 'success');
+    } else {
+      showNotification('重启失败: ' + result.error, 'error');
+    }
+  } catch (error) {
+    showNotification('重启失败: ' + error.message, 'error');
+  }
+}
+
+async function forceRestartGateway() {
+  if (!confirm('确定要强制重启网关吗？这将强制终止所有相关进程。')) {
+    return;
+  }
+
+  showNotification('正在强制重启网关...', 'info');
+  try {
+    const result = await window.qclawAPI.forceRestartGateway();
+    if (result.success) {
+      showNotification('✓ 强制重启成功', 'success');
+      await loadGatewayDiagnostics();
+    } else {
+      showNotification('强制重启失败: ' + result.error, 'error');
+    }
+  } catch (error) {
+    showNotification('强制重启失败: ' + error.message, 'error');
+  }
+}
+
+async function selfCheckAndRepair() {
+  const container = document.getElementById('self-check-results');
+  container.innerHTML = '<div class="loading">正在自检...</div>';
+
+  try {
+    const result = await window.qclawAPI.selfCheckAndRepair();
+
+    if (result.error) {
+      container.innerHTML = `<div class="error">自检失败: ${result.error}</div>`;
+      return;
+    }
+
+    let html = `<div class="check-summary ${result.success ? 'success' : 'warning'}">${result.message}</div>`;
+    html += '<div class="check-list">';
+
+    for (const check of result.results.checks) {
+      const statusIcon = check.status === 'ok' ? '✓' : '✗';
+      const statusClass = check.status === 'ok' ? 'ok' : 'error';
+      html += `
+        <div class="check-item ${statusClass}">
+          <span class="check-icon">${statusIcon}</span>
+          <span class="check-name">${check.name}</span>
+          <span class="check-message">${check.message || ''} ${check.pid ? `(PID: ${check.pid})` : ''}</span>
+        </div>
+      `;
+    }
+    html += '</div>';
+
+    if (result.results.fixed.length > 0) {
+      html += '<div class="fixed-list"><strong>已修复:</strong>';
+      for (const fix of result.results.fixed) {
+        html += `<div class="fixed-item">✓ ${fix}</div>`;
+      }
+      html += '</div>';
+    }
+
+    container.innerHTML = html;
+
+    if (result.success) {
+      showNotification('✓ 自检完成，一切正常', 'success');
+    } else {
+      showNotification('⚠ 自检完成，部分问题已自动修复', 'warning');
+    }
+
+  } catch (error) {
+    container.innerHTML = `<div class="error">自检失败: ${error.message}</div>`;
+  }
+}
 
 // 事件绑定
 document.addEventListener('DOMContentLoaded', () => {

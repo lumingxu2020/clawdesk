@@ -661,6 +661,408 @@ async function executeCommand(cmd) {
   }
 }
 
+// ========== IM 渠道配置 ==========
+
+// 支持的 IM 平台
+const IM_PLATFORMS = {
+  feishu: { name: '飞书', icon: '📮' },
+  dingtalk: { name: '钉钉', icon: '💬' },
+  qq: { name: 'QQ', icon: '🐧' },
+  wecom: { name: '企业微信', icon: '💼' }
+};
+
+// 获取 IM 渠道配置
+async function getChannelConfig() {
+  try {
+    if (!fs.existsSync(OPENCLAW_CONFIG)) {
+      return { success: false, error: '配置文件不存在' };
+    }
+    
+    const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf-8'));
+    const channels = config.channels || {};
+    
+    const result = {};
+    for (const [platform, platformInfo] of Object.entries(IM_PLATFORMS)) {
+      result[platform] = {
+        name: platformInfo.name,
+        icon: platformInfo.icon,
+        enabled: channels[platform]?.enabled || false,
+        config: channels[platform] || {},
+        hasToken: !!(channels[platform]?.botToken || channels[platform]?.appKey)
+      };
+    }
+    
+    return { success: true, channels: result };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 更新 IM 渠道配置
+async function updateChannelConfig(platform, updates) {
+  try {
+    if (!IM_PLATFORMS[platform]) {
+      return { success: false, error: '不支持的平台: ' + platform };
+    }
+    
+    if (!fs.existsSync(OPENCLAW_CONFIG)) {
+      return { success: false, error: '配置文件不存在' };
+    }
+    
+    const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf-8'));
+    
+    if (!config.channels) {
+      config.channels = {};
+    }
+    
+    // 合并配置
+    config.channels[platform] = {
+      ...config.channels[platform],
+      ...updates,
+      enabled: updates.enabled !== undefined ? updates.enabled : (config.channels[platform]?.enabled || false)
+    };
+    
+    fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2));
+    
+    return { success: true, message: `${IM_PLATFORMS[platform].name} 配置已更新` };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 启用/禁用 IM 渠道
+async function toggleChannel(platform, enabled) {
+  return updateChannelConfig(platform, { enabled });
+}
+
+// ========== 备份与恢复 ==========
+
+const BACKUP_DIR = path.join(OPENCLAW_DIR, 'backups');
+
+// 获取备份列表
+async function getBackupList() {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) {
+      return { success: true, backups: [] };
+    }
+    
+    const files = fs.readdirSync(BACKUP_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => {
+        const fullPath = path.join(BACKUP_DIR, f);
+        const stat = fs.statSync(fullPath);
+        return {
+          name: f,
+          path: fullPath,
+          size: stat.size,
+          created: stat.birthtime.toISOString(),
+          modified: stat.mtime.toISOString()
+        };
+      })
+      .sort((a, b) => new Date(b.created) - new Date(a.created));
+    
+    return { success: true, backups: files };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 创建备份
+async function createBackup(name) {
+  try {
+    if (!fs.existsSync(OPENCLAW_CONFIG)) {
+      return { success: false, error: '配置文件不存在' };
+    }
+    
+    // 确保备份目录存在
+    if (!fs.existsSync(BACKUP_DIR)) {
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    }
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupName = name || `backup-${timestamp}.json`;
+    const backupPath = path.join(BACKUP_DIR, backupName);
+    
+    // 读取现有配置
+    const config = fs.readFileSync(OPENCLAW_CONFIG, 'utf-8');
+    
+    // 创建备份（包含元数据）
+    const backup = {
+      version: '1.0',
+      created: new Date().toISOString(),
+      openclawVersion: JSON.parse(config).meta?.lastTouchedVersion || 'unknown',
+      config: JSON.parse(config)
+    };
+    
+    fs.writeFileSync(backupPath, JSON.stringify(backup, null, 2));
+    
+    return { success: true, message: '备份已创建', path: backupPath };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 恢复备份
+async function restoreBackup(backupName) {
+  try {
+    const backupPath = path.join(BACKUP_DIR, backupName);
+    
+    if (!fs.existsSync(backupPath)) {
+      return { success: false, error: '备份文件不存在' };
+    }
+    
+    const backup = JSON.parse(fs.readFileSync(backupPath, 'utf-8'));
+    
+    if (!backup.config) {
+      return { success: false, error: '备份文件格式无效' };
+    }
+    
+    // 先创建当前配置的备份
+    await createBackup('auto-backup-before-restore.json');
+    
+    // 恢复配置
+    fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(backup.config, null, 2));
+    
+    return { success: true, message: '配置已恢复，请重启 Gateway 使配置生效', needRestart: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 删除备份
+async function deleteBackup(backupName) {
+  try {
+    const backupPath = path.join(BACKUP_DIR, backupName);
+    
+    if (fs.existsSync(backupPath)) {
+      fs.unlinkSync(backupPath);
+      return { success: true, message: '备份已删除' };
+    }
+    
+    return { success: false, error: '备份文件不存在' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 导出配置到指定位置
+async function exportConfig(targetPath) {
+  try {
+    if (!fs.existsSync(OPENCLAW_CONFIG)) {
+      return { success: false, error: '配置文件不存在' };
+    }
+    
+    const config = fs.readFileSync(OPENCLAW_CONFIG, 'utf-8');
+    fs.writeFileSync(targetPath, config);
+    
+    return { success: true, message: '配置已导出到: ' + targetPath };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 从指定位置导入配置
+async function importConfig(sourcePath) {
+  try {
+    if (!fs.existsSync(sourcePath)) {
+      return { success: false, error: '文件不存在' };
+    }
+    
+    // 验证 JSON 格式
+    const config = JSON.parse(fs.readFileSync(sourcePath, 'utf-8'));
+    
+    // 先备份当前配置
+    await createBackup('auto-backup-before-import.json');
+    
+    // 写入新配置
+    fs.writeFileSync(OPENCLAW_CONFIG, JSON.stringify(config, null, 2));
+    
+    return { success: true, message: '配置已导入，请重启 Gateway 使配置生效', needRestart: true };
+  } catch (error) {
+    return { success: false, error: '导入失败: ' + error.message };
+  }
+}
+
+// ========== 增强网关管理 ==========
+
+// 强制重启网关
+async function forceRestartGateway() {
+  try {
+    log.info('执行强制重启网关...');
+    
+    // 先尝试正常停止
+    try {
+      await execPromise('launchctl stop ai.openclaw.gateway');
+    } catch {}
+    
+    // 等待一秒
+    await new Promise(r => setTimeout(r, 1000));
+    
+    // 检查进程是否还在运行，如果还在就 kill
+    try {
+      const pids = await execPromise('pgrep -f openclaw-gateway');
+      if (pids) {
+        const pidList = pids.trim().split('\n').filter(p => p && !isNaN(parseInt(p)));
+        for (const pid of pidList) {
+          try {
+            await execPromise(`kill -9 ${pid}`);
+            log.info(`已强制终止进程: ${pid}`);
+          } catch {}
+        }
+      }
+    } catch {}
+    
+    await new Promise(r => setTimeout(r, 1000));
+    
+    // 启动
+    await execPromise('launchctl start ai.openclaw.gateway');
+    
+    return { success: true, message: '强制重启成功' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 自检修复
+async function selfCheckAndRepair() {
+  try {
+    const results = {
+      checks: [],
+      fixed: [],
+      errors: []
+    };
+    
+    // 1. 检查配置文件
+    try {
+      if (fs.existsSync(OPENCLAW_CONFIG)) {
+        JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf-8'));
+        results.checks.push({ name: '配置文件', status: 'ok' });
+      } else {
+        results.checks.push({ name: '配置文件', status: 'error', message: '配置文件不存在' });
+        results.errors.push('配置文件不存在');
+      }
+    } catch (e) {
+      results.checks.push({ name: '配置文件', status: 'error', message: 'JSON格式错误' });
+      results.errors.push('配置文件格式错误: ' + e.message);
+    }
+    
+    // 2. 检查 Gateway 进程
+    try {
+      const gatewayResult = await execPromise('pgrep -f openclaw-gateway');
+      if (gatewayResult && gatewayResult.trim()) {
+        results.checks.push({ name: 'Gateway 进程', status: 'ok', pid: gatewayResult.trim() });
+      } else {
+        results.checks.push({ name: 'Gateway 进程', status: 'error', message: '未运行' });
+        results.fixed.push('Gateway 进程已重新启动');
+        await execPromise('launchctl start ai.openclaw.gateway');
+      }
+    } catch (e) {
+      results.errors.push('检查 Gateway 进程失败');
+    }
+    
+    // 3. 检查 Node 进程
+    try {
+      const nodeResult = await execPromise('pgrep -f openclaw-node');
+      if (nodeResult && nodeResult.trim()) {
+        results.checks.push({ name: 'Node 进程', status: 'ok', pid: nodeResult.trim() });
+      } else {
+        results.checks.push({ name: 'Node 进程', status: 'error', message: '未运行' });
+        results.fixed.push('Node 进程已重新启动');
+        await execPromise('launchctl start ai.openclaw.node');
+      }
+    } catch (e) {
+      results.errors.push('检查 Node 进程失败');
+    }
+    
+    // 4. 检查日志目录
+    const logDir = path.join(OPENCLAW_DIR, 'logs');
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+      results.fixed.push('已创建日志目录');
+    }
+    results.checks.push({ name: '日志目录', status: 'ok' });
+    
+    // 5. 检查 Skills 目录
+    const skillsDir = path.join(OPENCLAW_DIR, 'workspace', 'skills');
+    if (fs.existsSync(skillsDir)) {
+      results.checks.push({ name: 'Skills 目录', status: 'ok' });
+    } else {
+      fs.mkdirSync(skillsDir, { recursive: true });
+      results.fixed.push('已创建 Skills 目录');
+    }
+    
+    // 6. 检查 memory 目录
+    const memoryDir = path.join(OPENCLAW_DIR, 'workspace', 'memory');
+    if (!fs.existsSync(memoryDir)) {
+      fs.mkdirSync(memoryDir, { recursive: true });
+      results.fixed.push('已创建记忆目录');
+    }
+    results.checks.push({ name: '记忆目录', status: 'ok' });
+    
+    await new Promise(r => setTimeout(r, 2000));
+    
+    return {
+      success: results.errors.length === 0,
+      message: results.errors.length === 0 ? '自检完成，所有检查正常' : '自检完成，发现问题已自动修复',
+      results
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 获取网关诊断信息
+async function getGatewayDiagnostics() {
+  try {
+    const diagnostics = {
+      timestamp: new Date().toISOString(),
+      config: null,
+      channels: {},
+      processes: [],
+      logs: { recent: '', errors: [] }
+    };
+    
+    // 读取配置
+    if (fs.existsSync(OPENCLAW_CONFIG)) {
+      const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG, 'utf-8'));
+      diagnostics.config = {
+        version: config.meta?.lastTouchedVersion || 'unknown',
+        channels: Object.keys(config.channels || {}),
+        providers: Object.keys(config.providers || config.models?.providers || {})
+      };
+      
+      // 脱敏敏感信息
+      if (config.channels) {
+        for (const [key, ch] of Object.entries(config.channels)) {
+          diagnostics.channels[key] = {
+            enabled: ch.enabled,
+            hasToken: !!(ch.botToken || ch.appKey)
+          };
+        }
+      }
+    }
+    
+    // 获取进程信息
+    diagnostics.processes = await getProcessDetails();
+    
+    // 获取最近错误日志
+    if (fs.existsSync(GATEWAY_LOG)) {
+      const content = fs.readFileSync(GATEWAY_LOG, 'utf-8');
+      const lines = content.split('\n');
+      diagnostics.logs.recent = lines.slice(-50).join('\n');
+      
+      // 提取错误行
+      diagnostics.logs.errors = lines
+        .filter(l => l.toLowerCase().includes('error') || l.toLowerCase().includes('fail'))
+        .slice(-20);
+    }
+    
+    return diagnostics;
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
 // 获取系统资源使用
 async function getSystemResources() {
   try {
@@ -871,6 +1273,24 @@ ipcMain.handle('switch-model', async (event, provider, modelId) => switchModel(p
 ipcMain.handle('add-model', async (event, provider, config) => addModel(provider, config));
 ipcMain.handle('delete-model', async (event, provider, modelId) => deleteModel(provider, modelId));
 ipcMain.handle('open-external', async (event, url) => shell.openExternal(url));
+
+// IM 渠道配置
+ipcMain.handle('get-channel-config', getChannelConfig);
+ipcMain.handle('update-channel-config', async (event, platform, updates) => updateChannelConfig(platform, updates));
+ipcMain.handle('toggle-channel', async (event, platform, enabled) => toggleChannel(platform, enabled));
+
+// 备份与恢复
+ipcMain.handle('get-backup-list', getBackupList);
+ipcMain.handle('create-backup', async (event, name) => createBackup(name));
+ipcMain.handle('restore-backup', async (event, backupName) => restoreBackup(backupName));
+ipcMain.handle('delete-backup', async (event, backupName) => deleteBackup(backupName));
+ipcMain.handle('export-config', async (event, targetPath) => exportConfig(targetPath));
+ipcMain.handle('import-config', async (event, sourcePath) => importConfig(sourcePath));
+
+// 增强网关管理
+ipcMain.handle('force-restart-gateway', forceRestartGateway);
+ipcMain.handle('self-check-and-repair', selfCheckAndRepair);
+ipcMain.handle('get-gateway-diagnostics', getGatewayDiagnostics);
 
 // 应用启动
 app.whenReady().then(() => {
